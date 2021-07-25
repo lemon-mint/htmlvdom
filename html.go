@@ -13,7 +13,7 @@ import (
 	"github.com/cespare/xxhash"
 )
 
-var globalIDCounter uint64
+var globalIDCounter uint64 = 1024 // reserved
 
 var elPool = sync.Pool{New: func() interface{} {
 	return &Element{
@@ -113,6 +113,15 @@ func (el *Element) RemoveAttribute(key string) {
 
 func (el *Element) HasChildNodes() bool {
 	return len(el.Children) > 0
+}
+
+func (el *Element) IndexChild(child *Element) (int, bool) {
+	for i, c := range el.Children {
+		if c == child {
+			return i, true
+		}
+	}
+	return -1, false
 }
 
 func (el *Element) Clone(deep bool) *Element {
