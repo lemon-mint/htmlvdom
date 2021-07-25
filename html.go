@@ -1,11 +1,19 @@
 package htmlvdom
 
 import (
+	"encoding/binary"
 	"fmt"
+	"hash"
 	"html"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
+
+	"github.com/cespare/xxhash"
 )
+
+var globalIDCounter uint64
 
 var elPool = sync.Pool{New: func() interface{} {
 	return &Element{
@@ -14,21 +22,65 @@ var elPool = sync.Pool{New: func() interface{} {
 	}
 }}
 
+var hashPool = sync.Pool{New: func() interface{} {
+	return xxhash.New()
+}}
+
 type Element struct {
 	TagName  string
 	Attrs    map[string]string
 	Children []*Element
 	Value    string
+	ID       uint64
+	XXHash   uint64
 	parent   *Element
+}
+
+func (el *Element) InitHash() {
+	h := hashPool.Get().(hash.Hash64)
+	h.Write(StringToBytes(el.TagName))
+	keys := make([]string, 0, len(el.Attrs))
+	for k := range el.Attrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		h.Write(StringToBytes(k))
+		h.Write(StringToBytes(el.Attrs[k]))
+	}
+	h.Write(StringToBytes(el.Value))
+	for _, child := range el.Children {
+		var ch [8]byte
+		binary.BigEndian.PutUint64(ch[:], child.XXHash)
+		h.Write(ch[:])
+	}
+	el.XXHash = h.Sum64()
+	hashPool.Put(h)
+}
+
+func (el *Element) Hash() {
+	el.InitHash()
+	if el.parent != nil {
+		el.parent.Hash()
+	}
 }
 
 func CreateElement(tagName string) *Element {
 	el := elPool.Get().(*Element)
+	el.GetNewID()
 	el.TagName = tagName
+	el.Hash()
 	return el
 }
 
+func (el *Element) GetNewID() uint64 {
+	id := atomic.AddUint64(&globalIDCounter, 1)
+	el.ID = id
+	return id
+}
+
 func (el *Element) AppendChild(child *Element) {
+	defer el.Hash()
 	if el.TagName == "__textnode__" {
 		return
 	}
@@ -40,6 +92,7 @@ func (el *Element) AppendChild(child *Element) {
 }
 
 func (el *Element) SetAttribute(key, value string) {
+	defer el.Hash()
 	el.Attrs[key] = value
 }
 
@@ -54,6 +107,7 @@ func (el *Element) GetAttribute(key string) (string, error) {
 }
 
 func (el *Element) RemoveAttribute(key string) {
+	defer el.Hash()
 	delete(el.Attrs, key)
 }
 
@@ -66,6 +120,7 @@ func (el *Element) Clone(deep bool) *Element {
 		clone := &Element{
 			TagName: el.TagName,
 			Attrs:   make(map[string]string),
+			XXHash:  el.XXHash,
 		}
 		for k, v := range el.Attrs {
 			clone.Attrs[k] = v
@@ -82,14 +137,27 @@ func (el *Element) Clone(deep bool) *Element {
 	return &Element{
 		TagName: el.TagName,
 		Attrs:   attrs,
+		XXHash:  el.XXHash,
 	}
 }
 
 func (el *Element) RemoveChild(child *Element) {
+	defer el.Hash()
 	for i, c := range el.Children {
 		if c == child {
 			el.Children = append(el.Children[:i], el.Children[i+1:]...)
 			child.parent = nil
+			return
+		}
+	}
+}
+
+func (el *Element) ReplaceChild(oldChild, newChild *Element) {
+	for i, c := range el.Children {
+		if c == oldChild {
+			el.Children[i] = newChild
+			newChild.parent = el
+			oldChild.parent = nil
 			return
 		}
 	}
@@ -104,7 +172,7 @@ func (el *Element) Remove() {
 func (el *Element) SetInnerText(text string) {
 	textNode := CreateTextNode(text)
 	for _, child := range el.Children {
-		el.RemoveChild(child)
+		child.parent = nil
 	}
 	el.Children = el.Children[:0]
 	el.AppendChild(textNode)
@@ -113,13 +181,12 @@ func (el *Element) SetInnerText(text string) {
 func CreateTextNode(text string) *Element {
 	textNode := CreateElement("__textnode__")
 	textNode.Value = html.EscapeString(text)
+	textNode.Hash()
 	return textNode
 }
 
 func (el *Element) Destory() {
-	if el.parent != nil {
-		el.parent.RemoveChild(el)
-	}
+	el.Remove()
 	for _, child := range el.Children {
 		child.Destory()
 	}
@@ -130,6 +197,7 @@ func (el *Element) Destory() {
 	el.parent = nil
 	el.Value = ""
 	el.TagName = ""
+	el.Hash()
 	elPool.Put(el)
 }
 
@@ -155,4 +223,14 @@ func (el *Element) String() string {
 	b.WriteString(el.TagName)
 	b.WriteString(">")
 	return b.String()
+}
+
+func (el *Element) Init() {
+	el.GetNewID()
+	for _, child := range el.Children {
+		child.parent = el
+		child.Init()
+		child.InitHash()
+	}
+	el.InitHash()
 }
