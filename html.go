@@ -95,6 +95,12 @@ func (el *Element) RemoveChild(child *Element) {
 	}
 }
 
+func (el *Element) Remove() {
+	if el.parent != nil {
+		el.parent.RemoveChild(el)
+	}
+}
+
 func (el *Element) SetInnerText(text string) {
 	textNode := CreateTextNode(text)
 	for _, child := range el.Children {
@@ -111,6 +117,9 @@ func CreateTextNode(text string) *Element {
 }
 
 func (el *Element) Destory() {
+	if el.parent != nil {
+		el.parent.RemoveChild(el)
+	}
 	for _, child := range el.Children {
 		child.Destory()
 	}
