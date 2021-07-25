@@ -3,8 +3,10 @@ package htmlvdom
 import "reflect"
 
 func Diff(a, b *Element) *Difference {
-	d := &Difference{}
-	if a != nil && b != nil {
+	d := &Difference{
+		Diff: make([]*Operation, 0, 1024),
+	}
+	if a == nil && b == nil {
 		return d
 	}
 	diffNodes(a, b, d, b.ID)

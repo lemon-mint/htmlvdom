@@ -117,7 +117,7 @@ func (el *Element) HasChildNodes() bool {
 
 func (el *Element) IndexChild(child *Element) (int, bool) {
 	for i, c := range el.Children {
-		if c == child {
+		if c.ID == child.ID {
 			return i, true
 		}
 	}
@@ -130,6 +130,8 @@ func (el *Element) Clone(deep bool) *Element {
 			TagName: el.TagName,
 			Attrs:   make(map[string]string),
 			XXHash:  el.XXHash,
+			ID:      el.ID,
+			Value:   el.Value,
 		}
 		for k, v := range el.Attrs {
 			clone.Attrs[k] = v
@@ -143,11 +145,14 @@ func (el *Element) Clone(deep bool) *Element {
 	for k, v := range el.Attrs {
 		attrs[k] = v
 	}
-	return &Element{
+	clone := &Element{
 		TagName: el.TagName,
 		Attrs:   attrs,
 		XXHash:  el.XXHash,
+		ID:      el.ID,
+		Value:   el.Value,
 	}
+	return clone
 }
 
 func (el *Element) RemoveChild(child *Element) {
