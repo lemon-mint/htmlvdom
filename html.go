@@ -4,7 +4,15 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"sync"
 )
+
+var elPool = sync.Pool{New: func() interface{} {
+	return &Element{
+		TagName: "__textnode__",
+		Attrs:   make(map[string]string),
+	}
+}}
 
 type Element struct {
 	TagName  string
@@ -15,20 +23,17 @@ type Element struct {
 }
 
 func CreateElement(tagName string) *Element {
-	return &Element{
-		TagName: tagName,
-		Attrs:   make(map[string]string),
-	}
+	el := elPool.Get().(*Element)
+	el.TagName = tagName
+	return el
 }
 
 func (el *Element) AppendChild(child *Element) {
+	if el.TagName == "__textnode__" {
+		return
+	}
 	if child.parent != nil {
 		child.parent.RemoveChild(child)
-	}
-	if child.TagName == "_text_node_" &&
-		len(el.Children) == 1 &&
-		el.Children[0].TagName == "_text_node_" {
-		el.Children[0].Value += child.Value
 	}
 	el.Children = append(el.Children, child)
 	child.parent = el
@@ -38,14 +43,18 @@ func (el *Element) SetAttribute(key, value string) {
 	el.Attrs[key] = value
 }
 
-var ErrElementAttributeNotFound = fmt.Errorf("element attribute not found")
+var ErrAttributeNotFound = fmt.Errorf("attribute not found")
 
 func (el *Element) GetAttribute(key string) (string, error) {
 	value, ok := el.Attrs[key]
 	if !ok {
-		return "", ErrElementAttributeNotFound
+		return "", ErrAttributeNotFound
 	}
 	return value, nil
+}
+
+func (el *Element) RemoveAttribute(key string) {
+	delete(el.Attrs, key)
 }
 
 func (el *Element) HasChildNodes() bool {
@@ -87,8 +96,7 @@ func (el *Element) RemoveChild(child *Element) {
 }
 
 func (el *Element) SetInnerText(text string) {
-	textNode := CreateElement("_text_node_")
-	textNode.Value = html.EscapeString(text)
+	textNode := CreateTextNode(text)
 	for _, child := range el.Children {
 		el.RemoveChild(child)
 	}
@@ -96,14 +104,28 @@ func (el *Element) SetInnerText(text string) {
 	el.AppendChild(textNode)
 }
 
-func (el *Element) CreateTextNode(text string) *Element {
-	textNode := CreateElement("_text_node_")
+func CreateTextNode(text string) *Element {
+	textNode := CreateElement("__textnode__")
 	textNode.Value = html.EscapeString(text)
 	return textNode
 }
 
+func (el *Element) Destory() {
+	for _, child := range el.Children {
+		child.Destory()
+	}
+	for key := range el.Attrs {
+		delete(el.Attrs, key)
+	}
+	el.Children = el.Children[:0]
+	el.parent = nil
+	el.Value = ""
+	el.TagName = ""
+	elPool.Put(el)
+}
+
 func (el *Element) String() string {
-	if el.TagName == "_text_node_" {
+	if el.TagName == "__textnode__" {
 		return el.Value
 	}
 	var b strings.Builder
