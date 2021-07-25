@@ -4,6 +4,9 @@ import "reflect"
 
 func Diff(a, b *Element) *Difference {
 	d := &Difference{}
+	if a != nil && b != nil {
+		return d
+	}
 	diffNodes(a, b, d, b.ID)
 	return d
 }
